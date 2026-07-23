@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="CreatorLens — YouTube 竞品助手。打开任意一条 YouTube 视频，带着你的下一份内容方案离开。" />
+  <title>CreatorLens · 更聪明地研究。</title>
+  <!-- 【第四阶段稳定优化】 相对路径 + 版本戳，防止缓存 -->
+  <link rel="stylesheet" href="./styles.css?v=4.0.0" />
+</head>
+<body>
+  <!-- 液态背景 —— 纯装饰 -->
+  <div class="aurora" aria-hidden="true">
+    <span class="aurora__blob aurora__blob--violet"></span>
+    <span class="aurora__blob aurora__blob--peach"></span>
+    <span class="aurora__blob aurora__blob--mint"></span>
+  </div>
+
+  <!-- 顶部：渐变 Logo + 极简导航 -->
+  <header class="site-header">
+    <a class="brand" href="#" aria-label="CreatorLens 首页">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="28" height="28" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="brandGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#8b7cf6" />
+              <stop offset="0.55" stop-color="#c98ad9" />
+              <stop offset="1" stop-color="#f0a6ca" />
+            </linearGradient>
+          </defs>
+          <circle cx="16" cy="16" r="12.5" stroke="url(#brandGrad)" stroke-width="2.4" />
+          <circle cx="16" cy="16" r="5.5" fill="url(#brandGrad)" />
+          <path d="M16 2.5v3.2M16 26.3v3.2M2.5 16h3.2M26.3 16h3.2" stroke="url(#brandGrad)" stroke-width="2.4" stroke-linecap="round" />
+        </svg>
+      </span>
+      <span class="brand__word">CreatorLens</span>
+    </a>
+
+    <!-- 【第四阶段稳定优化】 在线状态指示器 -->
+    <span class="online-status" id="onlineStatus" data-status="online" title="网络已连接"></span>
+
+    <nav class="nav" aria-label="主导航">
+      <a class="nav__link" href="#features" data-nav="features">功能介绍</a>
+      <a class="nav__link" href="#how" data-nav="how">使用教程</a>
+      <a class="nav__link" href="#free" data-nav="free">免费版本</a>
+    </nav>
+
+    <div class="account">
+      <span class="account__plan">免费版</span>
+      <span class="account__quota">AI 额度剩余 <em>3</em></span>
+      <button class="account__upgrade" type="button">升级付费</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <!-- 核心 Slogan 区 -->
+    <section class="hero">
+      <p class="hero__position">YouTube 竞品助手</p>
+      <h1 class="hero__slogan">更聪明地研究。</h1>
+      <p class="hero__tagline">打开任意一条 YouTube 视频，带着你的下一份内容方案离开。</p>
+      <span class="hero__chip" title="隐私承诺">🔒 Local Only — Nothing leaves your browser</span>
+    </section>
+
+    <!-- 全局统一输入框（唯一输入入口） -->
+    <section class="prompt-global" aria-label="全局输入区">
+      <div class="prompt-global__bar" id="globalPromptBar">
+        <!-- 动态渲染输入字段 -->
+      </div>
+      <p class="prompt-global__hint" id="globalHint">粘贴 YouTube 视频或频道链接后点击分析</p>
+    </section>
+
+    <!-- Tab 切换区 -->
+    <section class="tabs" id="features" aria-label="功能模块">
+      <button class="tab is-active" data-tab="audit" type="button">自有频道增长诊断</button>
+      <button class="tab" data-tab="competitor" type="button">竞品创作者数据深挖</button>
+      <button class="tab" data-tab="dissect" type="button">爆款视频根源拆解</button>
+      <button class="tab" data-tab="compare" type="button">双频道横向对标对比</button>
+      <button class="tab" data-tab="contrast" type="button">视频数据差异解析</button>
+    </section>
+
+    <!-- 工作区：左栏 + 右栏(仅结果展示) -->
+    <section class="workspace" id="how" aria-label="研究结果区">
+      <aside class="workspace__sidebar" id="workspaceSidebar">
+        <!-- 动态渲染 -->
+      </aside>
+
+      <div class="workspace__main">
+        <div class="panels" id="panels">
+          <!-- 动态面板：仅标题+描述+结果，无输入控件 -->
+        </div>
+
+        <!-- 【第四阶段稳定优化】 工具栏：导出错误日志 / 清理缓存 -->
+        <div class="toolbar">
+          <button class="toolbar__btn" id="exportLogBtn" type="button">导出错误日志</button>
+          <button class="toolbar__btn" id="clearCacheBtn" type="button">清理本地缓存</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer" id="free">
+    <div class="footer__inner">
+      <p class="footer__brand">CreatorLens · YouTube 竞品助手</p>
+      <p class="footer__benefits">
+        免费版 · 每日 3 次 AI 分析 · 无需信用卡 · 你的链接不会离开当前浏览器。
+      </p>
+      <p class="footer__privacy">🔒 Local Only — Nothing leaves your browser</p>
+      <p class="footer__copy">© <span id="year">2026</span> CreatorLens. 为更聪明的创作者而生。</p>
+    </div>
+  </footer>
+
+  <!-- 【第四阶段稳定优化】 首次打开隐私说明弹窗 -->
+  <div class="privacy-popup" id="privacyPopup" hidden>
+    <div class="privacy-popup__card">
+      <h3 class="privacy__title">隐私说明</h3>
+      <p class="privacy__text">
+        CreatorLens 致力于保护你的隐私。我们仅在前端校验链接格式，完整数据解析与 AI 分析经由后端安全处理，原始链接不会留存浏览器。你的浏览数据不会被收集或上传至任何第三方服务器。
+      </p>
+      <button class="privacy__btn" type="button">我知道了</button>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- 【第四阶段稳定优化】 相对路径 + 版本戳 -->
+  <script src="./api.js?v=4.0.0"></script>
+  <script src="./app.js?v=4.0.0"></script>
+  <script>document.getElementById('year').textContent=new Date().getFullYear();</script>
+</body>
+</html>

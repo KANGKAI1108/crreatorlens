@@ -1,0 +1,13 @@
+{
+  "name": "creatorlens-web",
+  "version": "4.0.0",
+  "description": "CreatorLens YouTube 竞品助手网页端",
+  "private": true,
+  "scripts": {
+    "dev": "python3 -m http.server 8080",
+    "build": "echo 'Static project — output in public/ directory'",
+    "preview": "python3 -m http.server 8080"
+  },
+  "keywords": ["creatorlens", "youtube", "analytics"],
+  "license": "MIT"
+}
