@@ -20,12 +20,13 @@
 (function () {
   'use strict';
 
-  /* 【第四阶段稳定优化】 生产环境标记 */
-  const PROD = true;
+  /* 【第五阶段修复】 生产环境标记：设为 false 可开启调试日志 */
+  const PROD = false;
   const Log = {
     info()  { if (!PROD) console.log.apply(console, arguments); },
     warn()  { if (!PROD) console.warn.apply(console, arguments); },
-    error() { console.error.apply(console, arguments); }
+    error() { console.error.apply(console, arguments); },
+    debug() { if (!PROD) console.debug.apply(console, arguments); }
   };
 
   /* 【第四阶段稳定优化】 版本号（用于缓存清理） */
@@ -692,7 +693,7 @@
 
   /* =========================================================
      4. ResultRenderer —— 完整结果渲染
-     【第四阶段稳定优化】 空值兜底 ?. + 分段渲染
+     【第五阶段修复】 简化逻辑，不在 render 中判断 isFallback
      ========================================================= */
   const ResultRenderer = {
     renderEmpty(resultEl, msg) {
@@ -705,33 +706,19 @@
       resultEl.innerHTML = '<div class="result__empty result__empty--error">' + msg + '</div>';
     },
 
-    render(resultEl, panelType, response) {
+    /* 【第五阶段修复】 render 不再处理 isFallback/isMock，由 api.js 统一校验 */
+    render(resultEl, panelType, data) {
       if (!resultEl) return;
 
-      /* 【第四阶段稳定优化】 空值兜底 */
-      if (!response) {
+      /* 数据为空 */
+      if (!data) {
         this.renderEmpty(resultEl, '暂无数据。');
         return;
       }
 
-      // 后端返回结构：{ success: true, data: { sourceData, aiResult } }
-      const data = response?.data || response || {};
+      // 后端返回结构：{ sourceData, aiResult }
       const sourceData = data?.sourceData || {};
       const aiResult = data?.aiResult || {};
-
-      // ① 判断 aiResult.isFallback
-      if (aiResult?.isFallback === true) {
-        resultEl.innerHTML = '';
-        Toast.show('Gemini调用失败，无有效分析结果', 'error');
-        return;
-      }
-
-      // ② 判断 sourceData.isMock
-      if (sourceData?.isMock === true) {
-        resultEl.innerHTML = '';
-        Toast.show('检测到模拟数据，已拒绝展示。', 'error');
-        return;
-      }
 
       // 提取 AI 分析结果（全兜底）
       const score = typeof aiResult?.score === 'number' ? aiResult.score : 0;
@@ -748,7 +735,7 @@
       Gauge.injectDefs();
       Gauge.animate(resultEl);
 
-      /* 【第四阶段稳定优化】 AI 长文本分段渲染 */
+      /* AI 长文本分段渲染 */
       this._renderFullTextSegmented(resultEl, fullText);
     },
 
@@ -1037,25 +1024,38 @@
       // 调用后端 API
       window.CreatorLensAPI.request(this._currentTab, collected)
         .then(async (response) => {
-          if (response?.success) {
-            /* 【第四阶段稳定优化】 缓存到 IndexedDB */
-            const url = collected[0]?.value || '';
-            if (url) await CacheManager.set(url, response.data);
-
-            ResultRenderer.render(resultEl, this._currentTab, response.data);
-            Toast.show('分析完成，结果已生成。', 'success');
-
-            /* 【第四阶段稳定优化】 扣减额度 */
-            QuotaManager.increment();
-          } else {
-            // 接口错误：清空结果区域，仅弹窗展示后端 msg
+          /* 【第五阶段修复】 三层状态互斥判断 */
+          
+          // ① HTTP 请求完全失败（网络错误、超时等）
+          if (!response || !response.success) {
             const errorMsg = response?.message || '分析失败，请稍后重试。';
             if (resultEl) resultEl.innerHTML = '';
             Toast.show(errorMsg, 'error');
+            return;
           }
+
+          // ② HTTP 成功，但数据无效（Gemini 调用失败、空数据等）
+          if (response._isDataValid === false) {
+            const errorMsg = response._invalidMessage || '分析结果无效，请稍后重试。';
+            if (resultEl) resultEl.innerHTML = '';
+            Toast.show(errorMsg, 'error');
+            return;
+          }
+
+          // ③ 请求成功且数据有效
+          /* 缓存到 IndexedDB */
+          const url = collected[0]?.value || '';
+          if (url) await CacheManager.set(url, response.data);
+
+          ResultRenderer.render(resultEl, this._currentTab, response.data);
+          Toast.show('分析完成，结果已生成。', 'success');
+
+          /* 扣减额度 */
+          QuotaManager.increment();
         })
-        .catch(() => {
+        .catch((err) => {
           // 网络异常：清空结果区域，仅弹窗
+          Log.error('[GlobalInput] 请求异常:', err);
           if (resultEl) resultEl.innerHTML = '';
           Toast.show('网络异常，请稍后重试。', 'error');
         })
