@@ -109,6 +109,61 @@
     </div>
   </footer>
 
+  <!-- 【第六阶段】 调试展示面板：完整展示AI原始返回数据，便于定位报错环节 -->
+  <!-- 后续可一键隐藏/删除：注释或删除整个 <details id="debugPanel"> 节点即可 -->
+  <details class="debug-panel" id="debugPanel" open>
+    <summary class="debug-panel__title">🔍 AI 完整原始返回数据调试区</summary>
+    <div class="debug-panel__body">
+      <!-- 第一块：请求发送参数 -->
+      <section class="debug-section">
+        <h4 class="debug-section__title">① 请求发送参数</h4>
+        <div class="debug-section__grid">
+          <div class="debug-item">
+            <span class="debug-item__label">YouTube 链接</span>
+            <span class="debug-item__value" id="debugReqUrl">—</span>
+          </div>
+          <div class="debug-item">
+            <span class="debug-item__label">请求时间戳</span>
+            <span class="debug-item__value" id="debugReqTime">—</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 第二块：完整流程状态 -->
+      <section class="debug-section">
+        <h4 class="debug-section__title">② 分析流程状态</h4>
+        <ol class="debug-steps" id="debugSteps">
+          <li class="debug-step" data-step="1" data-state="pending">
+            <span class="debug-step__icon">○</span>
+            <span class="debug-step__label">步骤1：链接格式校验</span>
+            <span class="debug-step__detail">—</span>
+          </li>
+          <li class="debug-step" data-step="2" data-state="pending">
+            <span class="debug-step__icon">○</span>
+            <span class="debug-step__label">步骤2：发起 AI 分析请求</span>
+            <span class="debug-step__detail">—</span>
+          </li>
+          <li class="debug-step" data-step="3" data-state="pending">
+            <span class="debug-step__icon">○</span>
+            <span class="debug-step__label">步骤3：接收后端返回数据</span>
+            <span class="debug-step__detail">—</span>
+          </li>
+          <li class="debug-step" data-step="4" data-state="pending">
+            <span class="debug-step__icon">○</span>
+            <span class="debug-step__label">步骤4：解析 AI 分析文本</span>
+            <span class="debug-step__detail">—</span>
+          </li>
+        </ol>
+      </section>
+
+      <!-- 第三块：Worker 完整原始响应 -->
+      <section class="debug-section">
+        <h4 class="debug-section__title">③ Worker 完整原始响应</h4>
+        <pre class="debug-json" id="debugRawJson">// 等待分析请求...</pre>
+      </section>
+    </div>
+  </details>
+
   <!-- 【第四阶段稳定优化】 首次打开隐私说明弹窗 -->
   <div class="privacy-popup" id="privacyPopup" hidden>
     <div class="privacy-popup__card">

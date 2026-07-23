@@ -474,6 +474,77 @@
   };
 
   /* =========================================================
+     【第六阶段】 DebugPanel —— 调试展示面板
+     用于完整展示 AI 原始返回数据，便于定位接口空返回问题
+     【隐藏方式】 注释或删除此模块 + index.html 中 <details id="debugPanel"> 节点
+     ========================================================= */
+  const DebugPanel = {
+    _el: null,
+    _reqUrlEl: null,
+    _reqTimeEl: null,
+    _rawJsonEl: null,
+    _stepEls: null,
+
+    init() {
+      this._el = document.getElementById('debugPanel');
+      if (!this._el) return;
+      this._reqUrlEl = document.getElementById('debugReqUrl');
+      this._reqTimeEl = document.getElementById('debugReqTime');
+      this._rawJsonEl = document.getElementById('debugRawJson');
+      this._stepEls = this._el.querySelectorAll('.debug-step');
+      this.reset();
+    },
+
+    /* 【第六阶段】 重置所有状态 */
+    reset() {
+      if (this._reqUrlEl) this._reqUrlEl.textContent = '—';
+      if (this._reqTimeEl) this._reqTimeEl.textContent = '—';
+      if (this._rawJsonEl) this._rawJsonEl.textContent = '// 等待分析请求...';
+      if (this._stepEls) {
+        this._stepEls.forEach(el => {
+          el.dataset.state = 'pending';
+          el.querySelector('.debug-step__icon').textContent = '○';
+          el.querySelector('.debug-step__detail').textContent = '—';
+        });
+      }
+    },
+
+    /* 【第六阶段】 设置请求参数 */
+    setRequest(url) {
+      if (this._reqUrlEl) this._reqUrlEl.textContent = url || '—';
+      if (this._reqTimeEl) {
+        const now = new Date();
+        const ts = now.toISOString().replace('T', ' ').substring(0, 19);
+        this._reqTimeEl.textContent = ts + ' (' + Date.now() + ')';
+      }
+    },
+
+    /* 【第六阶段】 更新某一步状态 */
+    updateStep(step, state, detail) {
+      const el = this._stepEls ? this._stepEls[step - 1] : null;
+      if (!el) return;
+      el.dataset.state = state;
+      const icon = state === 'success' ? '✓' : (state === 'error' ? '✗' : (state === 'active' ? '…' : '○'));
+      el.querySelector('.debug-step__icon').textContent = icon;
+      el.querySelector('.debug-step__detail').textContent = detail || '—';
+    },
+
+    /* 【第六阶段】 写入原始 JSON */
+    setRawJson(data, error) {
+      if (!this._rawJsonEl) return;
+      if (error) {
+        this._rawJsonEl.textContent = '// 错误：' + error;
+        return;
+      }
+      try {
+        this._rawJsonEl.textContent = JSON.stringify(data, null, 2);
+      } catch (e) {
+        this._rawJsonEl.textContent = String(data);
+      }
+    }
+  };
+
+  /* =========================================================
      3. Loader —— 加载状态管理
      【第四阶段稳定优化】 新增进度条动画 + 心跳检测
      ========================================================= */
@@ -1018,18 +1089,32 @@
       const resultEl = panel ? panel.querySelector('[data-result]') : null;
       const btn = document.getElementById('globalSubmitBtn');
       const inputs = this._bar?.querySelectorAll('.prompt-input') || [];
+      const youtubeUrl = collected[0]?.value || '';
+
+      /* 【第六阶段】 步骤1：链接格式校验（已在 _collectInputs 完成） */
+      DebugPanel.reset();
+      DebugPanel.setRequest(youtubeUrl);
+      DebugPanel.updateStep(1, 'success', '链接校验通过');
 
       Loader.start(btn, resultEl, inputs);
+
+      /* 【第六阶段】 步骤2：发起 AI 分析请求 */
+      DebugPanel.updateStep(2, 'active', '正在请求AI接口...');
 
       // 调用后端 API
       window.CreatorLensAPI.request(this._currentTab, collected)
         .then(async (response) => {
-          /* 【第五阶段修复】 三层状态互斥判断 */
-          
+          /* 【第六阶段】 步骤3：接收后端返回数据 */
+          DebugPanel.setRawJson(response);
+          DebugPanel.updateStep(3, 'success', '接口已返回数据（状态码 200）');
+
+          /* 【第六阶段修复】 严格互斥判断，杜绝双提示同时出现 */
+
           // ① HTTP 请求完全失败（网络错误、超时等）
           if (!response || !response.success) {
             const errorMsg = response?.message || '分析失败，请稍后重试。';
             if (resultEl) resultEl.innerHTML = '';
+            DebugPanel.updateStep(4, 'error', errorMsg);
             Toast.show(errorMsg, 'error');
             return;
           }
@@ -1038,16 +1123,34 @@
           if (response._isDataValid === false) {
             const errorMsg = response._invalidMessage || '分析结果无效，请稍后重试。';
             if (resultEl) resultEl.innerHTML = '';
+            DebugPanel.updateStep(4, 'error', errorMsg);
             Toast.show(errorMsg, 'error');
             return;
           }
 
           // ③ 请求成功且数据有效
-          /* 缓存到 IndexedDB */
-          const url = collected[0]?.value || '';
-          if (url) await CacheManager.set(url, response.data);
+          const data = response.data;
+          const aiResult = data?.aiResult || {};
+          const fullText = (aiResult?.fullText || '').trim();
+          const summary = (aiResult?.summary || '').trim();
 
-          ResultRenderer.render(resultEl, this._currentTab, response.data);
+          /* 【第六阶段修复】 关键互斥判断：只有存在有效 AI 文字才算成功 */
+          if (fullText.length < 10 && summary.length < 5) {
+            // AI 字段为空/无有效内容 → 失败路径
+            const errorMsg = '【解析失败】AI 字段为空，请查看下方原始数据。';
+            if (resultEl) resultEl.innerHTML = '';
+            DebugPanel.updateStep(4, 'error', errorMsg);
+            Toast.show(errorMsg, 'error');
+            return;
+          }
+
+          // ④ 完全成功路径
+          DebugPanel.updateStep(4, 'success', '解析成功，共 ' + fullText.length + ' 字');
+
+          /* 缓存到 IndexedDB */
+          if (youtubeUrl) await CacheManager.set(youtubeUrl, data);
+
+          ResultRenderer.render(resultEl, this._currentTab, data);
           Toast.show('分析完成，结果已生成。', 'success');
 
           /* 扣减额度 */
@@ -1057,6 +1160,8 @@
           // 网络异常：清空结果区域，仅弹窗
           Log.error('[GlobalInput] 请求异常:', err);
           if (resultEl) resultEl.innerHTML = '';
+          DebugPanel.updateStep(3, 'error', '网络异常：' + (err?.message || '未知错误'));
+          DebugPanel.updateStep(4, 'error', '请求中断');
           Toast.show('网络异常，请稍后重试。', 'error');
         })
         .finally(() => {
@@ -1163,6 +1268,9 @@
     Toast.init();
     GlobalInput.init();
 
+    /* 【第六阶段】 调试展示面板初始化 */
+    DebugPanel.init();
+
     /* 【第四阶段稳定优化】 IndexedDB 缓存初始化 */
     await CacheManager.init();
 
@@ -1186,6 +1294,7 @@
     PanelSwitcher,
     GlobalInput,
     ResultRenderer,
+    DebugPanel,  /* 【第六阶段】 暴露调试面板 */
     Toast,
     ErrorBoundary,
     CacheManager,

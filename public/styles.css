@@ -1053,3 +1053,198 @@ input { font: inherit; }
   .toolbar__btn { padding: 6px 12px; font-size: 11px; }
   .online-status { display: none; }
 }
+
+/* =========================================================
+   【第六阶段】 调试展示面板样式
+   灰色磨砂背景 + 等宽代码字体，支持滚动
+   ========================================================= */
+.debug-panel {
+  margin: 32px auto 0;
+  max-width: 1180px;
+  padding: 0 24px;
+}
+
+.debug-panel > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(245, 243, 250, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(124, 108, 180, 0.18);
+  border-radius: 12px;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.18s ease;
+}
+
+.debug-panel > summary:hover {
+  background: rgba(235, 230, 245, 0.95);
+}
+
+.debug-panel > summary::before {
+  content: '▸';
+  display: inline-block;
+  transition: transform 0.18s ease;
+  color: var(--theme-audit);
+}
+
+.debug-panel[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.debug-panel__body {
+  margin-top: 12px;
+  padding: 20px;
+  background: rgba(245, 243, 250, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(124, 108, 180, 0.18);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.debug-section {
+  border-top: 1px dashed rgba(124, 108, 180, 0.2);
+  padding-top: 14px;
+}
+
+.debug-section:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.debug-section__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin: 0 0 10px;
+  letter-spacing: 0.02em;
+}
+
+.debug-section__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.debug-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.65);
+  border-radius: 8px;
+  border: 1px solid rgba(124, 108, 180, 0.1);
+}
+
+.debug-item__label {
+  font-size: 11px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.debug-item__value {
+  font-family: 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  color: var(--ink);
+  word-break: break-all;
+}
+
+.debug-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.debug-step {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  border-left: 3px solid rgba(124, 108, 180, 0.25);
+  transition: all 0.2s ease;
+}
+
+.debug-step[data-state="active"] {
+  background: rgba(155, 140, 248, 0.12);
+  border-left-color: #8b7cf6;
+}
+
+.debug-step[data-state="success"] {
+  background: rgba(111, 199, 144, 0.12);
+  border-left-color: #6fc790;
+}
+
+.debug-step[data-state="error"] {
+  background: rgba(229, 100, 100, 0.1);
+  border-left-color: #e56464;
+}
+
+.debug-step__icon {
+  font-size: 16px;
+  font-weight: bold;
+  text-align: center;
+  font-family: monospace;
+}
+
+.debug-step[data-state="pending"] .debug-step__icon { color: var(--ink-faint); }
+.debug-step[data-state="active"] .debug-step__icon { color: #8b7cf6; }
+.debug-step[data-state="success"] .debug-step__icon { color: #2a8d4e; }
+.debug-step[data-state="error"] .debug-step__icon { color: #d04848; }
+
+.debug-step__label {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.debug-step__detail {
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-family: monospace;
+  text-align: right;
+  max-width: 50%;
+  word-break: break-word;
+}
+
+.debug-json {
+  margin: 0;
+  padding: 14px 16px;
+  background: rgba(35, 30, 60, 0.92);
+  color: #d8d4f0;
+  border-radius: 8px;
+  font-family: 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 360px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(180, 170, 220, 0.5) transparent;
+}
+
+.debug-json::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.debug-json::-webkit-scrollbar-thumb {
+  background: rgba(180, 170, 220, 0.5);
+  border-radius: 4px;
+}
