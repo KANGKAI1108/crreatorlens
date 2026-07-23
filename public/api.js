@@ -224,12 +224,46 @@
       }
 
       // 业务错误（code 非 200）
-      // 429 额度耗尽 / 403 密钥异常 特殊处理
+      // 【第二版修改】 区分限流、额度耗尽、解析失败
       if (parsed && parsed.code === 429) {
+        const aiResult = parsed.data?.aiResult || {};
+        if (aiResult.rateLimited) {
+          return {
+            success: false,
+            error: 'RATE_LIMITED',
+            message: parsed.msg || '调用频次过高，请10秒后重试',
+            _retryable: true  // 可重试（等10秒）
+          };
+        }
+        if (aiResult.quotaExceeded) {
+          return {
+            success: false,
+            error: 'QUOTA_EXCEEDED',
+            message: parsed.msg || 'AI分析额度已耗尽，请明日再试或升级付费版。',
+            _retryable: false
+          };
+        }
         return {
           success: false,
           error: 'QUOTA_EXCEEDED',
           message: parsed.msg || 'AI分析额度已耗尽，请明日再试或升级付费版。',
+          _retryable: false
+        };
+      }
+      if (parsed && parsed.code === 500) {
+        const aiResult = parsed.data?.aiResult || {};
+        if (aiResult.parseFailed) {
+          return {
+            success: false,
+            error: 'PARSE_FAILED',
+            message: parsed.msg || 'AI返回内容解析失败，请稍后重试。',
+            _retryable: true  // 可重试
+          };
+        }
+        return {
+          success: false,
+          error: 'API_ERROR',
+          message: parsed.msg || '分析失败，请稍后重试。',
           _retryable: false
         };
       }
