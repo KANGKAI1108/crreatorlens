@@ -1,8 +1,5 @@
 {
-  "version": 2,
-  "build": {
-    "outputDirectory": "public"
-  },
+  "outputDirectory": "public",
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
