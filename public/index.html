@@ -178,7 +178,9 @@
   <div class="toast-wrap" id="toastWrap" aria-live="polite" aria-atomic="true"></div>
 
   <!-- 【第四阶段稳定优化】 相对路径 + 版本戳 -->
+  <!-- 【v3 纯本地版】 localAnalysis.js 必须在 app.js 之前加载 -->
   <script src="./api.js?v=4.0.0"></script>
+  <script src="./localAnalysis.js?v=3.0.0"></script>
   <script src="./app.js?v=4.0.0"></script>
   <script>document.getElementById('year').textContent=new Date().getFullYear();</script>
 </body>

@@ -763,8 +763,8 @@
   };
 
   /* =========================================================
-     4. ResultRenderer —— 完整结果渲染
-     【第五阶段修复】 简化逻辑，不在 render 中判断 isFallback
+     4. ResultRenderer —— 完整结果渲染（v3 本地版）
+     接收本地分析引擎的报告，渲染分段分析内容
      ========================================================= */
   const ResultRenderer = {
     renderEmpty(resultEl, msg) {
@@ -777,112 +777,162 @@
       resultEl.innerHTML = '<div class="result__empty result__empty--error">' + msg + '</div>';
     },
 
-    /* 【第五阶段修复】 render 不再处理 isFallback/isMock，由 api.js 统一校验 */
-    render(resultEl, panelType, data) {
+    /* 入口：直接渲染本地分析报告 */
+    render(resultEl, panelType, report) {
       if (!resultEl) return;
-
-      /* 数据为空 */
-      if (!data) {
+      if (!report) {
         this.renderEmpty(resultEl, '暂无数据。');
         return;
       }
 
-      // 后端返回结构：{ sourceData, aiResult }
-      const sourceData = data?.sourceData || {};
-      const aiResult = data?.aiResult || {};
-
-      // 提取 AI 分析结果（全兜底）
-      const score = typeof aiResult?.score === 'number' ? aiResult.score : 0;
-      const summary = aiResult?.summary || '';
-      const fullText = aiResult?.fullText || '';
-
-      // 统一渲染逻辑
-      const html = this._renderUnified(panelType, sourceData, score, summary, fullText);
-
+      const html = this._renderLocalReport(panelType, report);
       resultEl.innerHTML = html;
       this._bindCopyButtons(resultEl);
 
-      // 注入仪表盘 SVG 渐变定义并触发动画
       Gauge.injectDefs();
       Gauge.animate(resultEl);
-
-      /* AI 长文本分段渲染 */
-      this._renderFullTextSegmented(resultEl, fullText);
     },
 
-    _renderUnified(panelType, sourceData, score, summary, fullText) {
-      const gaugeHtml = Gauge.buildCard(score, '综合爆款潜力评分', summary);
+    /* 渲染本地分析报告 */
+    _renderLocalReport(panelType, report) {
+      const score = report.score || 0;
+      const gaugeHtml = Gauge.buildCard(score, '综合账号评分（本地规则引擎）', report.growth?.label || '—');
 
-      // 完整分析文本区块（占位容器，分段渲染填充）
-      const fullTextHtml = fullText ?
-        '<div class="result__section">' +
-        '<h4 class="result__section-title">AI 深度分析报告</h4>' +
-        '<div class="result__fulltext" id="fullTextContainer"></div>' +
-        '<button class="result__copy-btn" type="button" data-copy-target=".result__fulltext">一键复制完整报告</button>' +
-        '</div>' : '';
-
-      // 频道源数据展示（如有）
-      const sourceHtml = this._renderSourceData(sourceData);
+      // 分段渲染：账号定位 / 流量数据 / 爆款规律 / 改进建议
+      const sections = [
+        this._sectionAudience(report),
+        this._sectionFlow(report),
+        this._sectionCadence(report),
+        this._sectionHits(report),
+        this._sectionGrowth(report),
+        this._sectionSuggestions(report),
+      ].filter(Boolean).join('');
 
       return (
         '<div class="result__section">' +
-        '<h4 class="result__section-title">频道分析结果</h4>' +
+        '<h4 class="result__section-title">📊 频道分析结果</h4>' +
         gaugeHtml +
         '</div>' +
-        sourceHtml +
-        fullTextHtml +
-        '<p class="result__note">本地仅校验链接格式，完整数据解析与 AI 分析将经由后端安全处理，原始链接不会留存浏览器。</p>'
+        sections +
+        '<p class="result__note">本报告由前端本地规则引擎（v3）生成，无任何外部 AI 调用，100% 离线运算。数据源：YouTube Data API v3。</p>'
       );
     },
 
-    /* 【第四阶段稳定优化】 AI 长文本分段渲染，避免一次性渲染卡顿 */
-    _renderFullTextSegmented(resultEl, fullText) {
-      const container = resultEl.querySelector('#fullTextContainer');
-      if (!container || !fullText) return;
-
-      const paragraphs = fullText.split('\n').filter(p => p.trim());
-      let idx = 0;
-
-      const renderNext = () => {
-        if (idx >= paragraphs.length) return;
-        const p = document.createElement('p');
-        p.textContent = paragraphs[idx];
-        p.style.opacity = '0';
-        container.appendChild(p);
-        requestAnimationFrame(() => {
-          p.style.transition = 'opacity .3s ease';
-          p.style.opacity = '1';
-        });
-        idx++;
-        // 每段间隔 50ms，避免一次性渲染卡顿
-        setTimeout(renderNext, 50);
-      };
-
-      renderNext();
-    },
-
-    _renderSourceData(sourceData) {
-      /* 【第四阶段稳定优化】 空值兜底 */
-      if (!sourceData || typeof sourceData !== 'object' || Object.keys(sourceData).length === 0) return '';
-
-      const name = sourceData?.channelName || sourceData?.name || sourceData?.title || '—';
-      const subs = sourceData?.subscriberCount || sourceData?.subscribers || sourceData?.subs || '—';
-      const views = sourceData?.viewCount || sourceData?.totalViews || sourceData?.views || '—';
-      const videos = sourceData?.videoCount || sourceData?.totalVideos || '—';
-
-      if (name === '—' && subs === '—' && views === '—') return '';
-
+    /* 分段1：账号定位 */
+    _sectionAudience(report) {
+      const a = report.audience;
+      if (!a) return '';
+      const matched = (a.primary?.matchedKeywords || []).slice(0, 6).join('、') || '—';
+      const sec = a.secondary ? `（次定位：${a.secondary.name}）` : '';
       return (
         '<div class="result__section">' +
-        '<h4 class="result__section-title">频道基础数据</h4>' +
-        '<div class="result__grid result__grid--2">' +
-        '<div class="result__card"><span class="result__card-label">频道名称</span><span class="result__card-value">' + name + '</span></div>' +
-        '<div class="result__card"><span class="result__card-label">订阅数</span><span class="result__card-value">' + subs + '</span></div>' +
-        '<div class="result__card"><span class="result__card-label">总播放量</span><span class="result__card-value">' + views + '</span></div>' +
-        '<div class="result__card"><span class="result__card-label">视频数</span><span class="result__card-value">' + videos + '</span></div>' +
+        '<h4 class="result__section-title">🎯 账号定位</h4>' +
+        '<div class="report-block">' +
+        '<p><strong>主赛道</strong>：' + (a.primary?.name || '未识别') + ' ' + sec + '</p>' +
+        '<p><strong>命中关键词</strong>：' + matched + '</p>' +
+        '<p class="report-block__hint">基于简介、标签、近 10 条视频标题/描述的关键词匹配结果。</p>' +
         '</div>' +
         '</div>'
       );
+    },
+
+    /* 分段2：流量层级 */
+    _sectionFlow(report) {
+      const f = report.flow;
+      if (!f) return '';
+      const top = f.top;
+      const bottom = f.bottom;
+      return (
+        '<div class="result__section">' +
+        '<h4 class="result__section-title">📈 流量数据</h4>' +
+        '<div class="result__grid result__grid--2">' +
+        '<div class="result__card"><span class="result__card-label">订阅数</span><span class="result__card-value">' + (report.subscriberCount || 0).toLocaleString() + '</span></div>' +
+        '<div class="result__card"><span class="result__card-label">总播放量</span><span class="result__card-value">' + (report.viewCount || 0).toLocaleString() + '</span></div>' +
+        '<div class="result__card"><span class="result__card-label">视频总数</span><span class="result__card-value">' + (report.videoCount || 0) + '</span></div>' +
+        '<div class="result__card"><span class="result__card-label">互动率</span><span class="result__card-value">' + (report.engagementRate !== null ? report.engagementRate + '%' : '—') + '</span></div>' +
+        '</div>' +
+        (top ? '<div class="report-block">' +
+          '<p><strong>近 10 条最高播放</strong>：' + (top.viewCount || 0).toLocaleString() + ' 次</p>' +
+          '<p class="report-block__title">"' + this._escape(top.title) + '"</p>' +
+          '</div>' : '') +
+        '</div>'
+      );
+    },
+
+    /* 分段3：更新节奏 */
+    _sectionCadence(report) {
+      const c = report.cadence;
+      if (!c) return '';
+      return (
+        '<div class="result__section">' +
+        '<h4 class="result__section-title">⏱️ 更新节奏</h4>' +
+        '<div class="report-block">' +
+        '<p><strong>更新频率</strong>：' + (c.label || '—') + '</p>' +
+        '<p><strong>平均间隔</strong>：' + (c.avgIntervalDays || 0) + ' 天</p>' +
+        '<p class="report-block__hint">' + (c.desc || '') + '</p>' +
+        '</div>' +
+        '</div>'
+      );
+    },
+
+    /* 分段4：爆款规律 */
+    _sectionHits(report) {
+      const h = report.hits;
+      if (!h) return '';
+      const topWords = (h.topWords || []).slice(0, 5).map(w => `${w.word}(${w.count})`).join('、');
+      const dr = h.durationRange;
+      return (
+        '<div class="result__section">' +
+        '<h4 class="result__section-title">🔥 爆款规律</h4>' +
+        '<div class="result__grid result__grid--2">' +
+        '<div class="result__card"><span class="result__card-label">爆款数 / 视频总数</span><span class="result__card-value">' + (h.hits?.length || 0) + ' / ' + ((h.hits?.length || 0) + (h.nonHits?.length || 0)) + '</span></div>' +
+        '<div class="result__card"><span class="result__card-label">平均播放</span><span class="result__card-value">' + (h.avgViews || 0).toLocaleString() + '</span></div>' +
+        '</div>' +
+        (dr ? '<div class="report-block"><p><strong>爆款时长区间</strong>：' + dr.minLabel + ' ~ ' + dr.maxLabel + '（均值 ' + dr.avgLabel + '）</p></div>' : '') +
+        (topWords ? '<div class="report-block"><p><strong>高频词</strong>：' + topWords + '</p></div>' : '') +
+        (h.commonPatterns && h.commonPatterns.length > 0 ?
+          '<div class="report-block"><p><strong>标题模式</strong>：' + h.commonPatterns.join('；') + '</p></div>' : '') +
+        '</div>'
+      );
+    },
+
+    /* 分段5：增长诊断 */
+    _sectionGrowth(report) {
+      const g = report.growth;
+      if (!g) return '';
+      return (
+        '<div class="result__section">' +
+        '<h4 class="result__section-title">📉 增长诊断</h4>' +
+        '<div class="report-block">' +
+        '<p><strong>账号阶段</strong>：' + (g.label || '—') + '</p>' +
+        '<p><strong>近期 vs 前期</strong>：' + (g.recentAvg || 0).toLocaleString() + ' / ' + (g.earlierAvg || 0).toLocaleString() + ' （' + (g.trend >= 0 ? '+' : '') + (g.trend || 0) + '%）</p>' +
+        '<p class="report-block__hint">' + (g.desc || '') + '</p>' +
+        '</div>' +
+        '</div>'
+      );
+    },
+
+    /* 分段6：优化建议 */
+    _sectionSuggestions(report) {
+      const suggestions = report.suggestions || [];
+      if (suggestions.length === 0) return '';
+      const items = suggestions.map(s => '<li>' + this._escape(s).replace(/\n/g, '<br>') + '</li>').join('');
+      return (
+        '<div class="result__section result__section--suggestions">' +
+        '<h4 class="result__section-title">💡 优化建议（基于本地规则库）</h4>' +
+        '<ul class="suggestions-list">' + items + '</ul>' +
+        '<button class="result__copy-btn" type="button" data-copy-target=".suggestions-list">一键复制建议</button>' +
+        '</div>'
+      );
+    },
+
+    _escape(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     },
 
     _bindCopyButtons(container) {
@@ -1101,16 +1151,16 @@
       /* 【第六阶段】 步骤2：发起 AI 分析请求 */
       DebugPanel.updateStep(2, 'active', '正在请求AI接口...');
 
-      // 调用后端 API
+      // 调用后端 API（仅获取 YouTube 原始数据）
       window.CreatorLensAPI.request(this._currentTab, collected)
-        .then(async (response) => {
-          /* 【第六阶段】 步骤3：接收后端返回数据 */
+        .then((response) => {
+          /* 【v3】 步骤3：接收后端返回数据 */
           DebugPanel.setRawJson(response);
           DebugPanel.updateStep(3, 'success', '接口已返回数据（状态码 200）');
 
-          /* 【第六阶段修复】 严格互斥判断，杜绝双提示同时出现 */
+          /* 【v3】 严格互斥判断 */
 
-          // ① HTTP 请求完全失败（网络错误、超时等）
+          // ① HTTP 请求完全失败
           if (!response || !response.success) {
             const errorMsg = response?.message || '分析失败，请稍后重试。';
             if (resultEl) resultEl.innerHTML = '';
@@ -1119,45 +1169,47 @@
             return;
           }
 
-          // ② HTTP 成功，但数据无效（Gemini 调用失败、空数据等）
-          if (response._isDataValid === false) {
-            const errorMsg = response._invalidMessage || '分析结果无效，请稍后重试。';
+          // ② 数据为空
+          if (!response.sourceData) {
+            const errorMsg = 'YouTube 爬取结果为空，请检查链接。';
             if (resultEl) resultEl.innerHTML = '';
             DebugPanel.updateStep(4, 'error', errorMsg);
             Toast.show(errorMsg, 'error');
             return;
           }
 
-          // ③ 请求成功且数据有效
-          const data = response.data;
-          const aiResult = data?.aiResult || {};
-          const fullText = (aiResult?.fullText || '').trim();
-          const summary = (aiResult?.summary || '').trim();
-
-          /* 【第六阶段修复】 关键互斥判断：只有存在有效 AI 文字才算成功 */
-          if (fullText.length < 10 && summary.length < 5) {
-            // AI 字段为空/无有效内容 → 失败路径
-            const errorMsg = '【解析失败】AI 字段为空，请查看下方原始数据。';
+          // ③ 调用【本地分析引擎】生成完整报告
+          let report;
+          try {
+            DebugPanel.updateStep(4, 'active', '正在本地分析引擎计算中...');
+            report = window.CreatorLensLocal.analyze(response.sourceData);
+          } catch (e) {
+            Log.error('[LocalAnalysis] 异常:', e);
+            const errorMsg = '本地分析引擎异常：' + e.message;
             if (resultEl) resultEl.innerHTML = '';
             DebugPanel.updateStep(4, 'error', errorMsg);
             Toast.show(errorMsg, 'error');
             return;
           }
 
-          // ④ 完全成功路径
-          DebugPanel.updateStep(4, 'success', '解析成功，共 ' + fullText.length + ' 字');
+          if (!report || report.error) {
+            const errorMsg = report?.message || '本地分析失败。';
+            if (resultEl) resultEl.innerHTML = '';
+            DebugPanel.updateStep(4, 'error', errorMsg);
+            Toast.show(errorMsg, 'error');
+            return;
+          }
+
+          // ④ 成功：本地分析完成
+          DebugPanel.updateStep(4, 'success', '本地规则分析完成（' + (report.meta?.videosAnalyzed || 0) + ' 条视频）');
 
           /* 缓存到 IndexedDB */
-          if (youtubeUrl) await CacheManager.set(youtubeUrl, data);
+          if (youtubeUrl) CacheManager.set(youtubeUrl, { sourceData: response.sourceData, report });
 
-          ResultRenderer.render(resultEl, this._currentTab, data);
-          Toast.show('分析完成，结果已生成。', 'success');
-
-          /* 扣减额度 */
-          QuotaManager.increment();
+          ResultRenderer.render(resultEl, this._currentTab, report);
+          Toast.show('本地分析完成，已生成完整报告。', 'success');
         })
         .catch((err) => {
-          // 网络异常：清空结果区域，仅弹窗
           Log.error('[GlobalInput] 请求异常:', err);
           if (resultEl) resultEl.innerHTML = '';
           DebugPanel.updateStep(3, 'error', '网络异常：' + (err?.message || '未知错误'));

@@ -1248,3 +1248,81 @@ input { font: inherit; }
   background: rgba(180, 170, 220, 0.5);
   border-radius: 4px;
 }
+
+/* =========================================================
+   【v3 本地版】 报告区块样式
+   ========================================================= */
+.report-block {
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  border: 1px solid rgba(124, 108, 180, 0.1);
+  margin-top: 10px;
+  line-height: 1.6;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.report-block p { margin: 6px 0; }
+
+.report-block__title {
+  font-size: 14px;
+  color: var(--ink-soft);
+  font-style: italic;
+  margin-top: 6px;
+}
+
+.report-block__hint {
+  font-size: 13px;
+  color: var(--ink-soft);
+  background: rgba(155, 140, 248, 0.06);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border-left: 3px solid var(--theme-audit);
+  margin-top: 8px;
+}
+
+.result__section--suggestions {
+  background: linear-gradient(135deg, rgba(155, 140, 248, 0.08), rgba(201, 138, 217, 0.08));
+  border-radius: 12px;
+  padding: 18px;
+  margin-top: 16px;
+}
+
+.suggestions-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  counter-reset: sug;
+}
+
+.suggestions-list li {
+  position: relative;
+  padding: 12px 14px 12px 44px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  line-height: 1.65;
+  color: var(--ink);
+  font-size: 14px;
+  border-left: 3px solid var(--theme-audit);
+}
+
+.suggestions-list li::before {
+  counter-increment: sug;
+  content: counter(sug);
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  background: var(--grad-brand);
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+}

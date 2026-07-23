@@ -1,47 +1,19 @@
 /**
- * CreatorLens Worker — Cloudflare Workers 后端
- * 【版本】 第二版：Google AI Studio 免费 Gemini Flash
- * 【域名】 generativelanguage.googleapis.com
- * 【鉴权】 API_KEY（从环境变量 GEMINI_API_KEY 读取）
+ * CreatorLens Worker —— Cloudflare Workers 后端
+ * 【版本】 第三版：纯数据爬取，已彻底移除所有 AI 大模型调用
+ * 【数据源】 YouTube Data API v3
+ * 【鉴权】 YOUTUBE_API_KEY（环境变量）
  *
- * 【功能】
- * - YouTube 频道/视频数据抓取
- * - Google Gemini Flash AI 分析
- * - URL 缓存（10 分钟，KV 存储）
- * - 限流识别（额度超限 vs 数据解析失败）
+ * 【核心变更 v3】
+ * - 完全删除 Google Vertex / Google AI Studio / Gemini 相关代码
+ * - 不再返回任何 AI 文本字段
+ * - 仅返回 YouTube 原始数据：频道信息 + 近 10 条视频统计
+ * - 仅保留爬取缓存（10 分钟）
  *
  * 【部署】
- * wrangler deploy
- * 环境变量：GEMINI_API_KEY = 你的 AI Studio API Key
+ * 环境变量：YOUTUBE_API_KEY = 你的 YouTube Data API v3 Key
  * KV 命名空间：CREATORLENS_CACHE
  */
-
-/* ==========================================================================
-   【配置】 AI Studio 接口参数
-   ========================================================================== */
-
-const AI_CONFIG = {
-  // 【第二版修改】 AI Studio 免费接口域名（非 Vertex）
-  BASE_URL: 'https://generativelanguage.googleapis.com',
-  MODEL: 'gemini-1.5-flash',  // 免费 Flash 模型
-  MAX_OUTPUT_TOKENS: 2048,
-  TEMPERATURE: 0.7,
-  MAX_CONTENT_LENGTH: 100000,  // YouTube 页面内容上限
-};
-
-const CACHE_CONFIG = {
-  TTL_SECONDS: 600,  // 【第二版新增】 10 分钟缓存
-  KEY_PREFIX: 'cl_cache:',
-};
-
-const RATE_LIMIT = {
-  MAX_REQUESTS_PER_MINUTE: 15,  // AI Studio 免费版每分钟 15 次
-  COOLDOWN_SECONDS: 10,        // 限流后建议等待 10 秒
-};
-
-/* ==========================================================================
-   【Worker 入口】
-   ========================================================================== */
 
 export default {
   async fetch(request, env, ctx) {
@@ -54,12 +26,12 @@ export default {
 
     // 健康检查
     if (url.pathname === '/health') {
-      return jsonResponse({ status: 'ok', version: '2.0-ai-studio' });
+      return jsonResponse({ status: 'ok', version: '3.0-pure-data', mode: 'local-analysis' });
     }
 
     // 主接口：POST /
     if (request.method === 'POST' && url.pathname === '/') {
-      return handleAnalysis(request, env, ctx);
+      return handleFetch(request, env, ctx);
     }
 
     return jsonResponse({ error: 'Not Found' }, 404);
@@ -67,14 +39,11 @@ export default {
 };
 
 /* ==========================================================================
-   【CORS 处理】
+   CORS 处理
    ========================================================================== */
 
 function handleCors() {
-  return new Response('', {
-    status: 204,
-    headers: corsHeaders(),
-  });
+  return new Response('', { status: 204, headers: corsHeaders() });
 }
 
 function corsHeaders() {
@@ -86,455 +55,271 @@ function corsHeaders() {
   };
 }
 
-/* ==========================================================================
-   【统一 JSON 响应】
-   ========================================================================== */
-
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      ...corsHeaders(),
-      'Content-Type': 'application/json',
-    },
+    headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
   });
 }
 
 /* ==========================================================================
-   【主处理函数】 频道分析
+   配置
    ========================================================================== */
 
-async function handleAnalysis(request, env, ctx) {
+const YOUTUBE_API = {
+  BASE: 'https://www.googleapis.com/youtube/v3',
+};
+
+const CACHE_CONFIG = {
+  TTL_SECONDS: 600,           // 10 分钟爬取缓存
+  KEY_PREFIX: 'cl_youtube:',  // 仅缓存 YouTube 爬取结果
+};
+
+/* ==========================================================================
+   主处理函数：仅做 YouTube 原始数据抓取，不做任何 AI 分析
+   ========================================================================== */
+
+async function handleFetch(request, env, ctx) {
   try {
-    // 1. 解析请求体
     const body = await request.json();
     const youtubeUrl = body?.youtubeUrl?.trim();
 
     if (!youtubeUrl) {
-      return jsonResponse({ code: 400, msg: '缺少 youtubeUrl 参数', data: null });
+      return jsonResponse({ code: 400, msg: '缺少 youtubeUrl 参数', sourceData: null });
     }
 
-    // 2. 验证 URL 合法性
     if (!isValidYouTubeUrl(youtubeUrl)) {
-      return jsonResponse({ code: 400, msg: '无效的 YouTube 链接', data: null });
+      return jsonResponse({ code: 400, msg: '无效的 YouTube 链接', sourceData: null });
     }
 
-    // 3. 生成缓存 Key（基于 URL hash）
-    const cacheKey = CACHE_CONFIG.KEY_PREFIX + hashUrl(youtubeUrl);
+    const apiKey = env.YOUTUBE_API_KEY;
+    if (!apiKey) {
+      return jsonResponse({ code: 500, msg: 'YOUTUBE_API_KEY 未配置', sourceData: null });
+    }
 
-    // 4. 【第二版新增】 检查缓存
+    // 解析 URL → channelId / handle / videoId
+    const parsed = parseYouTubeUrl(youtubeUrl);
+    if (!parsed.type) {
+      return jsonResponse({ code: 400, msg: '无法识别的 YouTube 链接', sourceData: null });
+    }
+
+    // 仅爬取缓存（不再缓存 AI 结果）
+    const cacheKey = CACHE_CONFIG.KEY_PREFIX + hashUrl(youtubeUrl);
     if (env.CREATORLENS_CACHE) {
       const cached = await env.CREATORLENS_CACHE.get(cacheKey);
       if (cached) {
         try {
-          const parsed = JSON.parse(cached);
-          // 检查缓存是否过期
-          if (Date.now() - parsed.ts < CACHE_CONFIG.TTL_SECONDS * 1000) {
-            console.log('[Cache] 命中缓存:', youtubeUrl);
-            return jsonResponse({
-              code: 200,
-              msg: 'success (cached)',
-              data: parsed.result,
-            });
+          const json = JSON.parse(cached);
+          if (Date.now() - json.ts < CACHE_CONFIG.TTL_SECONDS * 1000) {
+            console.log('[Worker] 命中 YouTube 爬取缓存');
+            return jsonResponse({ code: 200, msg: 'success (cached)', sourceData: json.data });
           }
-        } catch (e) {
-          // 缓存损坏，继续请求
-        }
+        } catch (e) {}
       }
     }
 
-    // 5. 获取 YouTube 页面内容
-    console.log('[Worker] 抓取 YouTube 内容:', youtubeUrl);
-    const pageContent = await fetchYouTubePage(youtubeUrl);
-
-    if (!pageContent || !pageContent.channelName) {
-      return jsonResponse({
-        code: 502,
-        msg: 'YouTube 页面抓取失败，请检查链接是否有效',
-        data: null,
-      });
+    // 调用 YouTube Data API v3
+    let sourceData;
+    if (parsed.type === 'video') {
+      sourceData = await fetchVideoData(apiKey, parsed.id, env, ctx);
+    } else {
+      sourceData = await fetchChannelData(apiKey, parsed, env, ctx);
     }
 
-    // 6. 构建 AI Prompt
-    const prompt = buildPrompt(youtubeUrl, pageContent);
-
-    // 7. 调用 Google AI Studio
-    console.log('[Worker] 调用 AI Studio:', AI_CONFIG.MODEL);
-    const aiResult = await callAIStudio(env, prompt);
-
-    // 8. 【第二版新增】 检查 AI 返回内容有效性
-    const aiValidation = validateAIResult(aiResult);
-
-    if (!aiValidation.valid) {
-      // 区分「额度超限」和「数据解析失败」
-      if (aiValidation.type === 'RATE_LIMITED') {
-        return jsonResponse({
-          code: 429,
-          msg: '调用频次过高，请10秒后重试',
-          data: {
-            sourceData: pageContent,
-            aiResult: {
-              isFallback: true,
-              score: 0,
-              summary: 'AI 分析服务限流，请稍后重试。',
-              fullText: '',
-              rateLimited: true,
-            },
-          },
-        });
-      }
-
-      if (aiValidation.type === 'QUOTA_EXCEEDED') {
-        return jsonResponse({
-          code: 429,
-          msg: 'AI 分析额度已耗尽，请明日再试或升级付费版',
-          data: {
-            sourceData: pageContent,
-            aiResult: {
-              isFallback: true,
-              score: 0,
-              summary: 'AI 额度已耗尽。',
-              fullText: '',
-              quotaExceeded: true,
-            },
-          },
-        });
-      }
-
-      // 数据解析失败
-      return jsonResponse({
-        code: 500,
-        msg: 'AI 返回内容解析失败',
-        data: {
-          sourceData: pageContent,
-          aiResult: {
-            isFallback: true,
-            score: 0,
-            summary: 'AI 分析结果为空，请稍后重试。',
-            fullText: '',
-            parseFailed: true,
-          },
-        },
-      });
+    if (!sourceData) {
+      return jsonResponse({ code: 502, msg: 'YouTube 爬取失败，请检查链接或 API Key', sourceData: null });
     }
 
-    // 9. 组装最终结果
-    const result = {
-      sourceData: pageContent,
-      aiResult: {
-        score: aiResult.score,
-        summary: aiResult.summary,
-        fullText: aiResult.fullText,
-        isFallback: false,
-      },
-    };
-
-    // 10. 【第二版新增】 写入缓存
+    // 写入爬取缓存
     if (env.CREATORLENS_CACHE) {
       ctx.waitUntil(
         env.CREATORLENS_CACHE.put(
           cacheKey,
-          JSON.stringify({ ts: Date.now(), result }),
+          JSON.stringify({ ts: Date.now(), data: sourceData }),
           { expirationTtl: CACHE_CONFIG.TTL_SECONDS }
         )
       );
     }
 
-    console.log('[Worker] 分析完成:', youtubeUrl);
-    return jsonResponse({ code: 200, msg: 'success', data: result });
+    return jsonResponse({ code: 200, msg: 'success', sourceData });
   } catch (error) {
     console.error('[Worker] 处理异常:', error);
-    return jsonResponse({
-      code: 500,
-      msg: '服务器内部错误',
-      data: null,
-    });
+    return jsonResponse({ code: 500, msg: '服务器内部错误', sourceData: null });
   }
 }
 
 /* ==========================================================================
-   【AI Studio 调用】
+   YouTube Data API v3 调用
    ========================================================================== */
 
-async function callAIStudio(env, prompt) {
-  const apiKey = env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY 未配置');
-  }
-
-  const url = `${AI_CONFIG.BASE_URL}/v1beta/models/${AI_CONFIG.MODEL}:generateContent?key=${apiKey}`;
-
-  const requestBody = {
-    contents: [{
-      parts: [{ text: prompt }],
-    }],
-    generationConfig: {
-      maxOutputTokens: AI_CONFIG.MAX_OUTPUT_TOKENS,
-      temperature: AI_CONFIG.TEMPERATURE,
-    },
-  };
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-  });
-
-  // 【第二版新增】 处理 HTTP 状态码
-  if (response.status === 429) {
-    // 限流
-    return { rawText: '', _rateLimited: true, _quotaExceeded: false };
-  }
-
-  if (response.status === 403) {
-    // 额度耗尽（403 表示超出配额）
-    return { rawText: '', _rateLimited: false, _quotaExceeded: true };
-  }
-
-  if (!response.ok) {
-    const errText = await response.text();
-    console.error('[AI Studio] HTTP', response.status, errText);
-    throw new Error('AI Studio 请求失败: HTTP ' + response.status);
-  }
-
-  const data = await response.json();
-
-  // 【第二版新增】 响应结构解析（AI Studio 格式）
-  const rawText = extractTextFromResponse(data);
-
-  return {
-    rawText,
-    _rateLimited: false,
-    _quotaExceeded: false,
-  };
-}
-
-/* ==========================================================================
-   【AI 响应解析】
-   ========================================================================== */
-
-function extractTextFromResponse(data) {
+async function fetchChannelData(apiKey, parsed, env, ctx) {
   try {
-    // AI Studio 标准响应格式
-    // candidates[0].content.parts[0].text
-    const candidates = data?.candidates;
-    if (candidates && candidates.length > 0) {
-      const content = candidates[0]?.content;
-      const parts = content?.parts;
-      if (parts && parts.length > 0) {
-        return parts.map(p => p.text || '').join('');
+    // 1. 解析频道 ID
+    let channelId = parsed.id;
+    if (parsed.handle) {
+      // 通过 handle 获取 channelId
+      channelId = await resolveHandleToChannelId(apiKey, parsed.handle);
+      if (!channelId) return null;
+    }
+
+    // 2. 拉取频道基本信息
+    const channelUrl = `${YOUTUBE_API.BASE}/channels?part=snippet,statistics,brandingSettings&id=${channelId}&key=${apiKey}`;
+    const channelResp = await fetch(channelUrl);
+    if (!channelResp.ok) {
+      console.error('[YouTube API] channels 失败:', channelResp.status);
+      return null;
+    }
+    const channelJson = await channelResp.json();
+    const channel = channelJson.items?.[0];
+    if (!channel) return null;
+
+    // 3. 拉取近 10 条视频
+    const videosUrl = `${YOUTUBE_API.BASE}/search?part=id&channelId=${channelId}&maxResults=10&order=date&type=video&key=${apiKey}`;
+    const videosResp = await fetch(videosUrl);
+    if (!videosResp.ok) {
+      console.error('[YouTube API] search 失败:', videosResp.status);
+      return null;
+    }
+    const videosJson = await videosResp.json();
+    const videoIds = (videosJson.items || []).map(v => v.id.videoId).filter(Boolean).join(',');
+
+    // 4. 拉取视频统计数据
+    let videos = [];
+    if (videoIds) {
+      const statsUrl = `${YOUTUBE_API.BASE}/videos?part=snippet,statistics,contentDetails&id=${videoIds}&key=${apiKey}`;
+      const statsResp = await fetch(statsUrl);
+      if (statsResp.ok) {
+        const statsJson = await statsResp.json();
+        videos = (statsJson.items || []).map(v => ({
+          videoId: v.id,
+          title: v.snippet?.title || '',
+          publishedAt: v.snippet?.publishedAt || '',
+          duration: v.contentDetails?.duration || '',         // ISO8601
+          durationSec: parseISO8601Duration(v.contentDetails?.duration || ''),
+          viewCount: parseInt(v.statistics?.viewCount || '0', 10),
+          likeCount: parseInt(v.statistics?.likeCount || '0', 10),
+          commentCount: parseInt(v.statistics?.commentCount || '0', 10),
+          tags: v.snippet?.tags || [],
+          description: (v.snippet?.description || '').substring(0, 500),
+        }));
       }
     }
-    return '';
-  } catch (e) {
-    console.error('[AI Studio] 响应解析失败:', e);
-    return '';
-  }
-}
-
-/* ==========================================================================
-   【AI 结果校验】 —— 区分限流和解析失败
-   ========================================================================== */
-
-function validateAIResult(aiResult) {
-  // 1. 检查 HTTP 限流标记
-  if (aiResult._rateLimited) {
-    return { valid: false, type: 'RATE_LIMITED' };
-  }
-
-  // 2. 检查额度耗尽标记
-  if (aiResult._quotaExceeded) {
-    return { valid: false, type: 'QUOTA_EXCEEDED' };
-  }
-
-  // 3. 解析 AI 返回文本
-  const rawText = aiResult.rawText || '';
-
-  // 【第二版新增】 检查是否为空内容
-  if (!rawText || rawText.trim().length < 10) {
-    return { valid: false, type: 'PARSE_FAILED' };
-  }
-
-  // 4. 从 AI 文本中提取结构化数据
-  const parsed = parseAIResponse(rawText);
-
-  // 5. 检查提取结果
-  if (!parsed || parsed.score === 0 && !parsed.summary) {
-    return { valid: false, type: 'PARSE_FAILED' };
-  }
-
-  return {
-    valid: true,
-    type: 'OK',
-    score: parsed.score,
-    summary: parsed.summary,
-    fullText: rawText,
-  };
-}
-
-/* ==========================================================================
-   【AI 文本解析】 —— 提取 score / summary
-   ========================================================================== */
-
-function parseAIResponse(rawText) {
-  try {
-    // 尝试解析 JSON 格式
-    // AI Flash 通常返回 JSON 或 Markdown
-    const jsonMatch = rawText.match(/```json\s*([\s\S]*?)\s*```/);
-    let jsonStr = '';
-
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1];
-    } else {
-      // 直接尝试匹配 JSON 对象
-      const braceMatch = rawText.match(/\{[\s\S]*?\}/);
-      if (braceMatch) {
-        jsonStr = braceMatch[0];
-      }
-    }
-
-    if (jsonStr) {
-      const parsed = JSON.parse(jsonStr);
-      return {
-        score: typeof parsed.score === 'number' ? parsed.score : 0,
-        summary: parsed.summary || parsed.conclusion || '',
-        fullText: rawText,
-      };
-    }
-
-    // 回退：从纯文本中提取分数和摘要
-    const scoreMatch = rawText.match(/评分[：:]\s*(\d+)/) || rawText.match(/score[：:]\s*(\d+)/i);
-    const summaryMatch = rawText.match(/(?:摘要|总结|结论)[：:]\s*([^\n]+)/);
 
     return {
-      score: scoreMatch ? parseInt(scoreMatch[1]) : 0,
-      summary: summaryMatch ? summaryMatch[1] : '',
-      fullText: rawText,
+      type: 'channel',
+      channelId: channelId,
+      channelName: channel.snippet?.title || '',
+      channelHandle: channel.snippet?.customUrl || '',
+      description: channel.snippet?.description || '',
+      thumbnail: channel.snippet?.thumbnails?.high?.url || channel.snippet?.thumbnails?.default?.url || '',
+      publishedAt: channel.snippet?.publishedAt || '',
+      country: channel.snippet?.country || '',
+      subscriberCount: parseInt(channel.statistics?.subscriberCount || '0', 10),
+      viewCount: parseInt(channel.statistics?.viewCount || '0', 10),
+      videoCount: parseInt(channel.statistics?.videoCount || '0', 10),
+      videos: videos,
+      fetchedAt: Date.now(),
     };
   } catch (e) {
-    console.error('[AI 解析] 失败:', e);
-    return { score: 0, summary: '', fullText: rawText };
+    console.error('[fetchChannelData] 异常:', e);
+    return null;
   }
 }
 
-/* ==========================================================================
-   【YouTube 页面抓取】
-   ========================================================================== */
-
-async function fetchYouTubePage(youtubeUrl) {
-  // 使用 YouTube 公开 API 或第三方服务获取页面内容
+async function fetchVideoData(apiKey, videoId, env, ctx) {
   try {
-    // 方案一：使用 YouTube oEmbed（无需 API Key）
-    const videoId = extractVideoId(youtubeUrl);
-    const channelName = extractChannelName(youtubeUrl);
+    const url = `${YOUTUBE_API.BASE}/videos?part=snippet,statistics,contentDetails&id=${videoId}&key=${apiKey}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    const item = json.items?.[0];
+    if (!item) return null;
 
-    // 如果是视频链接，获取视频信息
-    if (videoId) {
-      const oembedUrl = `https://www.youtube.com/oembed?url=https%3A//www.youtube.com/watch%3Fv%3D${videoId}&format=json`;
-      const resp = await fetch(oembedUrl);
-      if (resp.ok) {
-        const data = await resp.json();
-        return {
-          channelName: data.author_name || '未知频道',
-          videoTitle: data.title || '',
-          videoId: videoId,
-          subscriberCount: null,
-          viewCount: null,
-          rawTitle: data.title || '',
-        };
-      }
-    }
-
-    // 如果是频道链接
-    if (channelName) {
-      return {
-        channelName: channelName,
-        videoTitle: '',
-        videoId: null,
-        subscriberCount: null,
-        viewCount: null,
-        rawTitle: '',
-      };
-    }
-
-    return null;
+    return {
+      type: 'video',
+      channelId: item.snippet?.channelId || '',
+      channelName: item.snippet?.channelTitle || '',
+      videoId: videoId,
+      title: item.snippet?.title || '',
+      description: (item.snippet?.description || '').substring(0, 500),
+      publishedAt: item.snippet?.publishedAt || '',
+      duration: item.contentDetails?.duration || '',
+      durationSec: parseISO8601Duration(item.contentDetails?.duration || ''),
+      viewCount: parseInt(item.statistics?.viewCount || '0', 10),
+      likeCount: parseInt(item.statistics?.likeCount || '0', 10),
+      commentCount: parseInt(item.statistics?.commentCount || '0', 10),
+      tags: item.snippet?.tags || [],
+      thumbnail: item.snippet?.thumbnails?.high?.url || '',
+      fetchedAt: Date.now(),
+    };
   } catch (e) {
-    console.error('[YouTube] 抓取失败:', e);
+    console.error('[fetchVideoData] 异常:', e);
+    return null;
+  }
+}
+
+async function resolveHandleToChannelId(apiKey, handle) {
+  try {
+    const cleanHandle = handle.replace(/^@/, '');
+    const url = `${YOUTUBE_API.BASE}/channels?part=id&forHandle=${encodeURIComponent('@' + cleanHandle)}&key=${apiKey}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    return json.items?.[0]?.id || null;
+  } catch (e) {
     return null;
   }
 }
 
 /* ==========================================================================
-   【工具函数】
+   工具函数
    ========================================================================== */
 
 function isValidYouTubeUrl(url) {
-  const patterns = [
-    /youtube\.com\/@/,
-    /youtube\.com\/watch\?v=/,
-    /youtu\.be\//,
-    /youtube\.com\/channel\//,
-    /youtube\.com\/c\//,
-    /youtube\.com\/user\//,
-  ];
-  return patterns.some(p => p.test(url));
+  return /(?:youtube\.com|youtu\.be)/i.test(url);
 }
 
-function extractVideoId(url) {
+function parseYouTubeUrl(url) {
+  let m;
+
   // youtu.be/VIDEO_ID
-  let match = url.match(/youtu\.be\/([^?&/]+)/);
-  if (match) return match[1];
+  m = url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+  if (m) return { type: 'video', id: m[1] };
 
   // youtube.com/watch?v=VIDEO_ID
-  match = url.match(/youtube\.com\/watch\?v=([^&]+)/);
-  if (match) return match[1];
+  m = url.match(/youtube\.com\/watch\?v=([A-Za-z0-9_-]{11})/);
+  if (m) return { type: 'video', id: m[1] };
 
-  return null;
+  // youtube.com/channel/UC...
+  m = url.match(/youtube\.com\/channel\/(UC[A-Za-z0-9_-]{22})/);
+  if (m) return { type: 'channel', id: m[1] };
+
+  // youtube.com/@handle
+  m = url.match(/youtube\.com\/@([A-Za-z0-9._-]+)/);
+  if (m) return { type: 'channel', handle: '@' + m[1] };
+
+  // youtube.com/c/name
+  m = url.match(/youtube\.com\/c\/([A-Za-z0-9._-]+)/);
+  if (m) return { type: 'channel', handle: '@' + m[1] };
+
+  return { type: null };
 }
 
-function extractChannelName(url) {
-  // youtube.com/@channelname
-  const match = url.match(/youtube\.com\/@([^?/]+)/);
-  if (match) return decodeURIComponent(match[1]);
-
-  return null;
+function parseISO8601Duration(iso) {
+  // PT1H2M3S → 3723
+  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!m) return 0;
+  const h = parseInt(m[1] || '0', 10);
+  const min = parseInt(m[2] || '0', 10);
+  const s = parseInt(m[3] || '0', 10);
+  return h * 3600 + min * 60 + s;
 }
 
 function hashUrl(url) {
-  // 简单的 URL hash（DJB2 算法）
   let hash = 5381;
   for (let i = 0; i < url.length; i++) {
     hash = ((hash << 5) + hash) + url.charCodeAt(i);
     hash = hash & hash;
   }
   return Math.abs(hash).toString(16);
-}
-
-/* ==========================================================================
-   【AI Prompt 构建】
-   ========================================================================== */
-
-function buildPrompt(youtubeUrl, pageContent) {
-  const channelInfo = pageContent?.channelName || '未知';
-  const videoTitle = pageContent?.videoTitle || '';
-
-  return `你是一个专业的 YouTube 内容创作者分析助手。请分析以下 YouTube 频道/视频，并返回结构化的 JSON 数据。
-
-分析维度：
-1. 频道/视频评分（0-100 分）
-2. 简短摘要（50 字以内）
-
-输出格式（严格 JSON）：
-\`\`\`json
-{
-  "score": 数字,
-  "summary": "摘要文本"
-}
-\`\`\`
-
-目标链接：${youtubeUrl}
-频道名称：${channelInfo}
-视频标题：${videoTitle}
-
-请直接返回 JSON，不要添加其他说明。`;
 }
