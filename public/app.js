@@ -272,7 +272,7 @@
      【第四阶段稳定优化】 QuotaManager —— 额度计数器持久化
      ========================================================= */
   const QuotaManager = {
-    _DAILY_LIMIT: 3,
+    _DAILY_LIMIT: Infinity,
     _KEY: 'cl_quota',
 
     _getToday() {
@@ -295,24 +295,21 @@
     },
 
     getRemaining() {
-      return Math.max(0, this._DAILY_LIMIT - this.getState().used);
+      return Infinity;
     },
 
     increment() {
-      const state = this.getState();
-      state.used++;
-      localStorage.setItem(this._KEY, JSON.stringify(state));
+      // 无限制额度，不再累加计数
       this.updateUI();
     },
 
     canUse() {
-      return this.getRemaining() > 0;
+      return true;
     },
 
     updateUI() {
-      const remaining = this.getRemaining();
       const el = document.querySelector('.account__quota em');
-      if (el) el.textContent = remaining;
+      if (el) el.textContent = '∞';
     }
   };
 
